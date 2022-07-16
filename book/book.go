@@ -32,6 +32,7 @@ func GetBook(c *fiber.Ctx) error {
 }
 
 func NewBook(c *fiber.Ctx) error {
+	c.Accepts("application/json")
 	db := database.DBConn
 	var book Book
 	user := new(Book)
@@ -46,6 +47,28 @@ func NewBook(c *fiber.Ctx) error {
 	book.Rating = user.Rating
 	db.Create(&book)
 	return c.JSON(book)
+}
+
+func UpdateBook(c *fiber.Ctx) error {
+	db := database.DBConn
+
+	id := c.Params("id")
+	var bookId Book
+	db.Find(&bookId, id)
+
+	user := new(Book)
+
+	if err := c.BodyParser(user); err != nil {
+		fmt.Println("error = ", err)
+		return c.SendStatus(200)
+	}
+
+	bookId.Title = user.Title
+	bookId.Author = user.Author
+	bookId.Rating = user.Rating
+
+	db.Save(&bookId)
+	return c.JSON(&bookId)
 }
 
 func DeleteBook(c *fiber.Ctx) error {
