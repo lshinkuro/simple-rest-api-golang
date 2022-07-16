@@ -1,11 +1,15 @@
 package santri
 
 import (
+	"html"
+	"strings"
+
 	"github.com/go-playground/validator/v10"
 	"github.com/gofiber/fiber/v2"
 	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/sqlite"
-	"github.com/lshinkuro/go-fiber-tutorial/database"
+	"github.com/lshinkuro/go-fiber-tutorial/api/database"
+	"golang.org/x/crypto/bcrypt"
 )
 
 type Person struct {
@@ -26,8 +30,10 @@ type User struct {
 	Name     string `json:"name" validate:"required,min=3,max=32"`
 	IsActive *bool  `json:"isActive" validate:"required"`
 	Email    string `json:"email" validate:"required,email,min=6,max=32"`
+	Password string `json:"password" validate:"required,min=4,max=100"`
 	Job      Job    `json:"job" validate:"dive"`
 }
+
 type ErrorResponse struct {
 	FailedField string
 	Tag         string
@@ -35,6 +41,30 @@ type ErrorResponse struct {
 }
 
 var validate = validator.New()
+
+func Hash(password string) ([]byte, error) {
+	return bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+}
+
+func VerifyPassword(hashedPassword, password string) error {
+	return bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
+}
+
+func (u *User) BeforeSave() error {
+	hashedPassword, err := Hash(u.Password)
+
+	if err != nil {
+		return err
+	}
+	u.Password = string(hashedPassword)
+	return nil
+}
+
+func (u *User) PrepareToSave() {
+	u.ID = 0
+	u.Name = html.EscapeString(strings.TrimSpace(u.Name))
+	u.Email = html.EscapeString(strings.TrimSpace(u.Email))
+}
 
 func ValidateStruct(user User) []*ErrorResponse {
 	var errors []*ErrorResponse
@@ -53,22 +83,42 @@ func ValidateStruct(user User) []*ErrorResponse {
 
 func (ctx *User) checkValidateRequest(c *fiber.Ctx) (*User, error) {
 	if err := c.BodyParser(ctx); err != nil {
-		return ctx, c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+		return &User{}, c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"message": err.Error(),
 		})
 	}
 
 	errors := ValidateStruct(*ctx)
 	if errors != nil {
-		return ctx, c.Status(fiber.StatusBadRequest).JSON(errors)
+		return &User{}, c.Status(fiber.StatusBadRequest).JSON(errors)
 	}
 	return ctx, nil
 }
 
+func (u *User) SaveUser(db *gorm.DB) (*User, error) {
+	var err error
+	err = db.Debug().Create(&u).Error
+	if err != nil {
+		return &User{}, err
+	}
+	return u, nil
+}
+
+func (u *User) FindAllUsers(db *gorm.DB) (*User, error) {
+	var err error
+	users := User{}
+	err = db.Debug().Model(&User{}).Limit(100).Find(&users).Error
+	if err != nil {
+		return &User{}, err
+	}
+	return &users, err
+}
+
 func GetUsers(c *fiber.Ctx) error {
 	db := database.DBConn
-	var users []User
-	db.Find(&users)
+	var users User
+	users.FindAllUsers(db)
+	// db.Find(&users)
 	return c.JSON(users)
 }
 
@@ -81,7 +131,6 @@ func GetUserById(c *fiber.Ctx) error {
 }
 
 func NewUser(c *fiber.Ctx) error {
-	db := database.DBConn
 	var user User
 	requestBody := new(User)
 
@@ -91,7 +140,7 @@ func NewUser(c *fiber.Ctx) error {
 	user.Email = requestBody.Email
 	user.IsActive = requestBody.IsActive
 	user.Job = requestBody.Job
-	db.Create(&user)
+	user.SaveUser(database.DBConn)
 	return c.JSON(user)
 }
 
