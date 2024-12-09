@@ -18,6 +18,7 @@ func initDatabase() {
 	var err error
 	database.DBConn, err = gorm.Open("sqlite3", "books.db")
 	if err != nil {
+		log.Println(err)
 		panic("failed to connect database")
 	}
 	fmt.Println("Succesfully connect")
